@@ -3,20 +3,33 @@ package crawl
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/friendsofgo/errors"
 	kbucket "github.com/libp2p/go-libp2p-kbucket"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	log "github.com/sirupsen/logrus"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
-	
+
 	"github.com/dennis-tra/nebula-crawler/pkg/db"
 	"github.com/dennis-tra/nebula-crawler/pkg/metrics"
 	"github.com/dennis-tra/nebula-crawler/pkg/utils"
 )
+
+var f io.WriteCloser
+
+func init() {
+	var err error
+	f, err = os.Create("addr-reachability.csv")
+	if err != nil {
+		panic(err)
+	}
+}
 
 type P2PResult struct {
 	RoutingTable *RoutingTable
@@ -110,6 +123,30 @@ func (c *Crawler) connect(ctx context.Context, pi peer.AddrInfo) error {
 	if len(pi.Addrs) == 0 {
 		metrics.VisitErrorsCount.With(metrics.CrawlLabel).Inc()
 		return fmt.Errorf("skipping node as it has no public IP address") // change knownErrs map if changing this msg
+	}
+
+	for _, addr := range pi.Addrs {
+		limited := peer.AddrInfo{
+			ID:    pi.ID,
+			Addrs: []ma.Multiaddr{addr},
+		}
+
+		ctx, cancel := context.WithTimeout(ctx, c.config.DialTimeout)
+		defer cancel()
+
+		reachable := false
+		if err := c.host.Connect(ctx, limited); err == nil {
+			reachable = true
+		}
+		if _, err := fmt.Fprintf(f, "%s,%v,%s\n", pi.ID, reachable, addr); err != nil {
+			log.WithError(err).Warnln("AAAH")
+		}
+
+		if err := c.host.Network().ClosePeer(pi.ID); err != nil {
+			log.WithError(err).Warnln("close conn")
+		}
+
+		c.host.Peerstore().RemovePeer(pi.ID)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.config.DialTimeout)
