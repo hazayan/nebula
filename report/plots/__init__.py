@@ -1,5 +1,6 @@
 from .plot_agents_overall import plot_agents_overall
 from .plot_agents_kubo import plot_agents_kubo
+from .plot_agents_polkadot import plot_agents_polkadot_clients
 from .plot_peer_classifications import plot_peer_classifications, data_node_classifications
 from .plot_crawl_overview import plot_crawl_overview
 from .plot_crawl_properties import plot_crawl_properties

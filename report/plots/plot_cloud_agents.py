@@ -1,23 +1,28 @@
+from typing import Optional, List
+
 import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import ticker
 
-from lib.lib_agent import agent_name
+from lib.lib_agent import polkadot_version
 from lib.lib_fmt import fmt_thousands, fmt_percentage
 
 
-def plot_cloud_agents(df: pd.DataFrame, clouds: pd.DataFrame) -> plt.Figure:
-    df = df.assign(
-        agent_name=lambda data_frame: data_frame.agent_version.apply(agent_name),
-    )
+def plot_cloud_agents(df: pd.DataFrame, clouds: pd.DataFrame, polkadot_clients: List[str]) -> plt.Figure:
+    def get_client(agent_version: str) -> Optional[str]:
+        agent = polkadot_version(agent_version)
+        if agent is None:
+            return None
+        return agent.client
 
-    unique = df["agent_name"].unique()
-    fig, axs = plt.subplots((len(unique) + 1) // 2, 2, figsize=[15, 13], dpi=150)
-    for idx, agent in enumerate(sorted(unique)):
+    df["client"] = df.apply(lambda row: get_client(row["agent_version"]), axis=1)
+
+    fig, axs = plt.subplots((len(polkadot_clients) + 1) // 2, 2, figsize=[15, 13], dpi=150)
+    for idx, agent in enumerate(sorted(polkadot_clients)):
         ax = fig.axes[idx]
 
-        data = clouds[clouds["peer_id"].isin(df[df['agent_name'] == agent]["peer_id"])]
+        data = clouds[clouds["peer_id"].isin(df[df['client'] == agent]["peer_id"])]
         data = data.groupby(by="datacenter", as_index=False).count().sort_values('peer_id',
                                                                                  ascending=False).reset_index(drop=True)
         data = data.rename(columns={'peer_id': 'count'})
@@ -37,8 +42,8 @@ def plot_cloud_agents(df: pd.DataFrame, clouds: pd.DataFrame) -> plt.Figure:
     fig.suptitle(f"Datacenters by Agent Version")
     fig.set_tight_layout(True)
 
-    if len(unique) < len(fig.axes):
-        for ax in fig.axes[len(unique):]:
+    if len(polkadot_clients) < len(fig.axes):
+        for ax in fig.axes[len(polkadot_clients):]:
             fig.delaxes(ax)
 
     return fig

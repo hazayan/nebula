@@ -703,17 +703,19 @@ class DBClient:
         return DBClient.__flatten(cur.fetchall())
 
     @cache()
-    def get_agent_versions_distribution(self) -> pd.DataFrame:  # DONE
+    def get_agent_versions_distribution(self, with_storm=True) -> pd.DataFrame:  # DONE
         """
         get_agent_versions_distribution returns all agent versions with
         a count of peers that were discovered with such an agent version.
         """
         print("Getting agent versions distribution...")
+        qualifier = f"v.protocols_set_id IN ({self.fmt_list(self.get_storm_protocol_set_ids())})" if with_storm else "false"
+
         cur = self.conn.cursor()
         cur.execute(
             f"""
             WITH cte AS (
-                SELECT v.peer_id, av.agent_version, v.protocols_set_id IN ({self.fmt_list(self.get_storm_protocol_set_ids())}) is_storm
+                SELECT v.peer_id, av.agent_version, {qualifier} is_storm
                 FROM visits v
                     INNER JOIN agent_versions av on av.id = v.agent_version_id
                 WHERE v.visit_started_at >= {self.start}
@@ -730,15 +732,16 @@ class DBClient:
         return pd.DataFrame(cur.fetchall(), columns=['agent_version', 'is_storm', 'count'])
 
     @cache()
-    def get_peer_id_agent_versions(self) -> pd.DataFrame:  # DONE
+    def get_peer_id_agent_versions(self, with_storm=True) -> pd.DataFrame:  # DONE
         """
         get_peer_id_agent_versions returns all peer IDs and their agent versions
         """
         print("Getting peer id agent versions distribution...")
+        is_storm = "v.protocols_set_id IN ({self.fmt_list(self.get_storm_protocol_set_ids())})" if with_storm else "false"
         cur = self.conn.cursor()
         cur.execute(
             f"""
-            SELECT v.peer_id, av.agent_version, v.protocols_set_id IN ({self.fmt_list(self.get_storm_protocol_set_ids())}) is_storm
+            SELECT v.peer_id, av.agent_version, {is_storm} is_storm
             FROM visits v
                 INNER JOIN agent_versions av on av.id = v.agent_version_id
             WHERE v.visit_started_at >= {self.start}
@@ -752,7 +755,7 @@ class DBClient:
         return pd.DataFrame(cur.fetchall(), columns=['peer_id', 'agent_version', 'is_storm'])
 
     @cache()
-    def get_agent_versions_for_peer_ids(self, peer_ids: list[int]) -> pd.DataFrame:  # DONE
+    def get_agent_versions_for_peer_ids(self, peer_ids: list[int], with_storm=True) -> pd.DataFrame:  # DONE
         """
         get_agent_versions_for_peer_ids returns all agent versions with
         a count of peers that were discovered with such an agent version
@@ -762,6 +765,7 @@ class DBClient:
             return pd.DataFrame([], columns=['agent_version', 'is_storm', 'count'])
 
         print(f"Getting agent versions for {len(peer_ids)} peers...")
+        is_storm = f"v.protocols_set_id IN ({self.fmt_list(self.get_storm_protocol_set_ids())})" if with_storm else "false"
         cur = self.conn.cursor()
         cur.execute(
             f"""
@@ -770,7 +774,7 @@ class DBClient:
                 FROM unnest('{{{self.fmt_list(peer_ids)}}}'::INT[]) t(peer_id)
                 ORDER BY t.peer_id
             ), cte AS (
-                SELECT v.peer_id, av.agent_version, v.protocols_set_id IN ({self.fmt_list(self.get_storm_protocol_set_ids())}) is_storm
+                SELECT v.peer_id, av.agent_version, {is_storm} is_storm
                 FROM visits v
                     INNER JOIN agent_versions av on av.id = v.agent_version_id
                     INNER JOIN peer_ids pi ON pi.peer_id = v.peer_id

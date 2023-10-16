@@ -1,3 +1,4 @@
+import dataclasses
 import re
 from typing import Optional
 
@@ -32,3 +33,29 @@ def kubo_version(agent_version) -> Optional[str]:
         return None
 
     return match.group(2)
+
+
+@dataclasses.dataclass
+class Agent:
+    client: str
+    major: int
+    minor: int
+    patch: int
+
+    def version(self):
+        return f"{self.major}.{self.minor}.{self.patch}"
+
+
+def polkadot_version(agent_version) -> Optional[Agent]:
+    match = re.match(r"(?P<client>.*)\/v(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*).*",
+                     agent_version)
+    if match is None:
+        return None
+
+    return Agent(
+        match.group("client"),
+        match.group("major"),
+        match.group("minor"),
+        match.group("patch"),
+    )
+

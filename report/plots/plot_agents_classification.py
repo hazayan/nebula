@@ -1,7 +1,9 @@
+from typing import Optional
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
-from lib.lib_agent import agent_name
+from lib.lib_agent import agent_name, polkadot_version
 from lib.lib_fmt import fmt_thousands
 
 
@@ -13,46 +15,35 @@ def plot_agents_classification(agents):
 
         df = agents[node_class]
 
-        df = df.assign(
-            agent_name=lambda data_frame: data_frame.agent_version.apply(agent_name),
-        )
+        def get_client(agent_version: str) -> Optional[str]:
+            a = polkadot_version(agent_version)
+            if a is None:
+                return None
+            return a.client
+
+        df["client"] = df.apply(lambda row: get_client(row.agent_version), axis=1)
 
         agent_names_df = df \
-            .groupby(by=["agent_name", "is_storm"], as_index=False) \
+            .groupby(by=["client"], as_index=False) \
             .sum(numeric_only=True) \
             .sort_values('count', ascending=False)
         agent_names_total = agent_names_df["count"].sum()
 
-        peers_regular = agent_names_df[
-            (agent_names_df["agent_name"] == "storm") | (agent_names_df["is_storm"] == False)].reset_index(drop=True)
-        peers_storm = agent_names_df[
-            (agent_names_df["agent_name"] != "storm") & (agent_names_df["is_storm"] == True)].reset_index(drop=True)
+        result = agent_names_df.nlargest(10, columns="count")
+        other_count = agent_names_df.loc[~agent_names_df["client"].isin(result["client"]), "count"].sum()
 
-        bar = ax.bar(peers_regular["agent_name"], peers_regular["count"], label="Regular")
+        if other_count > 0:
+            result.loc[len(result)] = ['Rest', 0, other_count]
+
+        agent_names_df = result
+
+        bar = ax.barh(agent_names_df["client"], agent_names_df["count"])
         ax.bar_label(bar, padding=4,
-                     labels=["%.1f%%" % (100 * val / agent_names_total) for val in peers_regular["count"]])
+                     labels=["%.1f%%" % (100 * val / agent_names_total) for val in agent_names_df["count"]])
 
-        # find index of storm nodes
-        indexes = peers_regular["agent_name"][peers_regular["agent_name"] == "storm"].index
-        if len(indexes) > 0:
-            storm_index = indexes[0]
-
-            zeros = np.zeros(len(peers_regular["count"]))
-            bottom = zeros.copy()
-            bottom[storm_index] = peers_regular.iloc[storm_index]["count"]
-            for idx, row in peers_storm.iterrows():
-                count = zeros.copy()
-                count[storm_index] = row["count"]
-                bar = ax.bar(peers_regular["agent_name"], count, label=f"{row['agent_name']}", bottom=bottom)
-                ax.bar_label(bar, padding=6,
-                             labels=["%.1f%%" % (100 * val / agent_names_total) if val > 0 else "" for val in count])
-                bottom[storm_index] += row["count"]
-
-        ax.yaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
-        ax.legend(title="Node Type")
-        ax.set_xlabel("Agent")
-        ax.set_ylabel("Count")
+        ax.set_xlabel("Count")
         ax.set_title(f"{node_class.lower()} (Total Peers {fmt_thousands(agent_names_total)})")
+        ax.invert_yaxis()
 
     fig.suptitle(f"Agent Type By Classification")
 
