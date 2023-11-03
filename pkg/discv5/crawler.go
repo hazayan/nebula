@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/bits"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/dennis-tra/nebula-crawler/pkg/db"
 	discover "github.com/dennis-tra/nebula-crawler/pkg/eth"
 	"github.com/dennis-tra/nebula-crawler/pkg/metrics"
+	"github.com/dennis-tra/nebula-crawler/pkg/models"
 )
 
 type CrawlerConfig struct {
@@ -202,15 +204,41 @@ func (c *Crawler) connect(ctx context.Context, pi peer.AddrInfo) error {
 		return fmt.Errorf("skipping node as it has no public IP address") // change knownErrs map if changing this msg
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, c.cfg.DialTimeout)
-	defer cancel()
+	retry := 0
+	maxRetries := 1
+	for {
+		timeout := time.Duration(c.cfg.DialTimeout.Nanoseconds() / int64(retry+1))
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+		err := c.host.Connect(timeoutCtx, pi)
+		cancel()
 
-	if err := c.host.Connect(timeoutCtx, pi); err != nil {
-		metrics.VisitErrorsCount.With(metrics.CrawlLabel).Inc()
-		return err
+		if err == nil {
+			return nil
+		}
+
+		switch true {
+		case strings.Contains(err.Error(), db.ErrorStr[models.NetErrorNegotiateSecurityProtocol]):
+		case strings.Contains(err.Error(), db.ErrorStr[models.NetErrorConnectionRefused]):
+		case strings.Contains(err.Error(), db.ErrorStr[models.NetErrorConnectionResetByPeer]):
+		default:
+			return err
+		}
+
+		if retry == maxRetries {
+			metrics.VisitErrorsCount.With(metrics.CrawlLabel).Inc()
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			metrics.VisitErrorsCount.With(metrics.CrawlLabel).Inc()
+			return ctx.Err()
+		case <-time.After(time.Second * time.Duration(3*(retry+1))): // TODO: parameterize
+			retry += 1
+			continue
+		}
+
 	}
-
-	return nil
 }
 
 // identifyWait waits until any connection to a peer passed the Identify
@@ -219,7 +247,7 @@ func (c *Crawler) connect(ctx context.Context, pi peer.AddrInfo) error {
 // identified in the past. We detect a successful identification if an
 // AgentVersion is stored in the peer store
 func (c *Crawler) identifyWait(ctx context.Context, pi peer.AddrInfo) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second) // TODO: parameterize
 	defer cancel()
 
 	var wg sync.WaitGroup
